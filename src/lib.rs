@@ -1,14 +1,8 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod cli;
+pub mod bundler;
+pub mod unbundler;
+pub mod module_tree;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use cli::{Cli, Commands};
+pub use bundler::{bundle_files, bundle_only_used};
+pub use unbundler::unbundle_files;
