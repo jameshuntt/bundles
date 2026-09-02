@@ -1,0 +1,358 @@
+// start of unbundler.rs
+use colored::*;
+use regex::Regex;
+use std::{
+    fs::{self, File},
+    io::{self, BufRead, BufReader, Write},
+    path::Path,
+};
+
+pub fn unbundle_files(
+    bundled_file: &Path,
+    output_dir: &Path,
+    comment_prefix: &str,
+) -> io::Result<()> {
+    let start_re =
+        Regex::new(&format!(r"^{}\s*start of (.+)$", regex::escape(comment_prefix))).unwrap();
+    let end_re =
+        Regex::new(&format!(r"^{}\s*end of (.+)$", regex::escape(comment_prefix))).unwrap();
+
+    let file = File::open(bundled_file)?;
+    let reader = BufReader::new(file);
+    let mut current_path: Option<std::path::PathBuf> = None;
+    let mut buffer = Vec::new();
+
+    for line in reader.lines() {
+        let line = line?;
+        if let Some(cap) = start_re.captures(&line) {
+            current_path = Some(output_dir.join(cap[1].trim()));
+            buffer.clear();
+        } else if end_re.is_match(&line) {
+            if let Some(path) = current_path.take() {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                let mut out = File::create(&path)?;
+                for l in &buffer {
+                    writeln!(out, "{}", l)?;
+                }
+                println!(
+                    "{} {}",
+                    "✅ Wrote:".bright_blue(),
+                    path.display().to_string().bright_white()
+                );
+                buffer.clear();
+            }
+        } else if current_path.is_some() {
+            buffer.push(line);
+        }
+    }
+
+    println!(
+        "\n{} {}",
+        "🎉 Unbundling complete →".bright_green().bold(),
+        output_dir.display().to_string().bright_yellow()
+    );
+    Ok(())
+}
+// end of unbundler.rs
+
+// start of module_tree/hashing.rs
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::path::Path;
+
+pub fn hash_file(path: &Path) -> Option<String> {
+    fs::read(path).ok().map(|data| {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        format!("{:x}", hasher.finalize())
+    })
+}
+// end of module_tree/hashing.rs
+
+// start of module_tree/node.rs
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum NodeKind {
+    CrateRoot,
+    Module,
+    FolderModule,
+    LeafFile,
+    HybridModule,
+    Resource,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModuleNode {
+    pub name: String,
+    pub kind: NodeKind,
+    pub file_path: PathBuf,
+    pub hash: Option<String>,
+    pub children: Vec<ModuleNode>,
+}
+// end of module_tree/node.rs
+
+// start of module_tree/resolver.rs
+use super::{hashing::hash_file, node::{ModuleNode, NodeKind}};
+use std::fs;
+use std::path::{Path, PathBuf};
+use syn::{File, Item, ItemMod};
+
+pub fn resolve_module_tree(entry: &Path) -> Vec<ModuleNode> {
+    let mut nodes = Vec::new();
+    let base_dir = entry.parent().unwrap();
+    let content = fs::read_to_string(entry).unwrap_or_default();
+    let ast: File = syn::parse_file(&content).unwrap_or_else(|_| panic!("Failed to parse {:?}", entry));
+
+    for item in ast.items {
+        if let Item::Mod(ItemMod { ident, content: None, .. }) = item {
+            let mod_name = ident.to_string();
+            let file_path = base_dir.join(format!("{mod_name}.rs"));
+            let mod_rs_path = base_dir.join(&mod_name).join("mod.rs");
+
+            let (kind, path) = match (file_path.exists(), mod_rs_path.exists()) {
+                (true, false) => (NodeKind::Module, file_path.clone()),
+                (false, true) => (NodeKind::FolderModule, mod_rs_path.clone()),
+                (true, true) => (NodeKind::HybridModule, file_path.clone()),
+                _ => continue,
+            };
+
+            let hash = hash_file(&path);
+            let children = resolve_module_tree(&path);
+
+            nodes.push(ModuleNode {
+                name: mod_name,
+                kind,
+                file_path: path,
+                hash,
+                children,
+            });
+        }
+    }
+
+    nodes
+}
+
+pub fn flatten_tree(nodes: &[ModuleNode], list: &mut Vec<PathBuf>) {
+    for node in nodes {
+        list.push(node.file_path.clone());
+        flatten_tree(&node.children, list);
+    }
+}
+// end of module_tree/resolver.rs
+
+// start of module_tree/serializer.rs
+use super::node::ModuleNode;
+use std::io::{self, Write};
+
+pub fn serialize_tree(node: &ModuleNode, writer: &mut impl Write, depth: usize) -> io::Result<()> {
+    let indent = "  ".repeat(depth);
+    writeln!(
+        writer,
+        "{}- {} ({:?}) [{}]",
+        indent,
+        node.name,
+        node.kind,
+        node.hash.as_deref().unwrap_or("?")
+    )?;
+    for child in &node.children {
+        serialize_tree(child, writer, depth + 1)?;
+    }
+    Ok(())
+}
+// end of module_tree/serializer.rs
+
+// start of lib.rs
+pub mod cli;
+pub mod bundler;
+pub mod unbundler;
+pub mod module_tree;
+
+pub use cli::{Cli, Commands};
+pub use bundler::{bundle_files, bundle_only_used};
+pub use unbundler::unbundle_files;
+// end of lib.rs
+
+// start of bundler.rs
+use colored::*;
+use std::{
+    fs::{self, File},
+    io::{self, Write},
+    path::Path,
+};
+use walkdir::WalkDir;
+
+pub fn bundle_files(
+    root_dir: &Path,
+    output_file: &Path,
+    exts: &[String],
+    comment_prefix: &str,
+) -> io::Result<()> {
+    let root_dir = root_dir.canonicalize()?;
+    let mut out = File::create(output_file)?;
+    let include_all = exts.iter().any(|e| e == "*");
+
+    for entry in WalkDir::new(&root_dir).into_iter().filter_map(Result::ok) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        let ext_ok = include_all
+            || path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| exts.iter().any(|x| x.eq_ignore_ascii_case(e)))
+                .unwrap_or(false);
+
+        if ext_ok {
+            let rel_path = path.strip_prefix(&root_dir).unwrap();
+            writeln!(out, "{} start of {}", comment_prefix, rel_path.display())?;
+            let content = fs::read_to_string(path)?;
+            write!(out, "{}", content)?;
+            if !content.ends_with('\n') {
+                writeln!(out)?;
+            }
+            writeln!(out, "{} end of {}\n", comment_prefix, rel_path.display())?;
+
+            println!(
+                "{} {}",
+                "📦 Added:".bright_green(),
+                rel_path.display().to_string().bright_white()
+            );
+        }
+    }
+
+    println!(
+        "\n{} {}",
+        "✅ Bundle complete →".bright_green().bold(),
+        output_file.display().to_string().bright_yellow()
+    );
+    Ok(())
+}
+
+pub fn bundle_only_used(
+    root_dir: &Path,
+    output_file: &Path,
+    _exts: &[String],
+    comment_prefix: &str,
+    used_files: &[std::path::PathBuf],
+) -> io::Result<()> {
+    let mut out = File::create(output_file)?;
+    for path in used_files {
+        let content = fs::read_to_string(path)?;
+        let rel_path = path.strip_prefix(root_dir).unwrap_or(path);
+        writeln!(out, "{} start of {}", comment_prefix, rel_path.display())?;
+        write!(out, "{}", content)?;
+        if !content.ends_with('\n') {
+            writeln!(out)?;
+        }
+        writeln!(out, "{} end of {}\n", comment_prefix, rel_path.display())?;
+    }
+    Ok(())
+}
+// end of bundler.rs
+
+// start of module_tree.rs
+pub mod node;
+pub mod resolver;
+pub mod hashing;
+pub mod serializer;
+// end of module_tree.rs
+
+// start of main.rs
+mod cli;
+mod bundler;
+mod unbundler;
+mod module_tree;
+// mod utils;
+
+use clap::Parser;
+use cli::{Cli, Commands};
+use installation::{InstallOptions, build_and_install};
+use std::io;
+
+fn main() -> io::Result<()> {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::Install => {
+            let _ = build_and_install(InstallOptions::default("bundler"))
+                .expect("install failed");
+        }
+        Commands::Bundle {
+            root_dir,
+            output_file,
+            extensions,
+            comment_prefix,
+            use_lib,
+        } => {
+            let exts: Vec<String> =
+                extensions.split(',').map(|s| s.trim().to_string()).collect();
+
+            if let Some(lib_path) = use_lib {
+                let tree = module_tree::resolver::resolve_module_tree(&lib_path);
+                let mut files = Vec::new();
+                module_tree::resolver::flatten_tree(&tree, &mut files);
+                bundler::bundle_only_used(&root_dir, &output_file, &exts, &comment_prefix, &files)?;
+            } else {
+                bundler::bundle_files(&root_dir, &output_file, &exts, &comment_prefix)?;
+            }
+        }
+
+        Commands::Unbundle {
+            bundled_file,
+            output_dir,
+            comment_prefix,
+        } => {
+            unbundler::unbundle_files(&bundled_file, &output_dir, &comment_prefix)?;
+        }
+    }
+
+    Ok(())
+}
+// end of main.rs
+
+// start of cli.rs
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+
+/// Generic multi-language bundler and unbundler
+#[derive(Parser)]
+#[command(name = "bundlr", version, about = "Bundle or unbundle any file type easily")]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand)]
+pub enum Commands {
+    Install,
+    
+    /// Bundle files of specific type(s) from a directory into a single file.
+    Bundle {
+        #[arg(short, long)]
+        root_dir: PathBuf,
+        #[arg(short, long)]
+        output_file: PathBuf,
+        #[arg(short, long, default_value = "*")]
+        extensions: String,
+        #[arg(short = 'c', long, default_value = "#")]
+        comment_prefix: String,
+        #[arg(long)]
+        use_lib: Option<PathBuf>,
+    },
+
+    /// Unbundle a previously bundled file
+    Unbundle {
+        #[arg(short, long)]
+        bundled_file: PathBuf,
+        #[arg(short, long)]
+        output_dir: PathBuf,
+        #[arg(short = 'c', long, default_value = "#")]
+        comment_prefix: String,
+    },
+}
+// end of cli.rs
+

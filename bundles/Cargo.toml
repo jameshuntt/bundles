@@ -1,0 +1,29 @@
+[package]
+name = "bundles"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.78"
+license = "MIT OR Apache-2.0"
+description = "Bundle a source tree into one annotated file and unbundle it back, safely: marker lines per file, ignore dirs, text-only, no path escapes."
+authors = ["James Hunt <jameshuntdevelopment@gmail.com>"]
+repository = "https://github.com/jameshuntt/bundles"
+keywords = ["bundle", "source", "archive", "unbundle"]
+categories = ["command-line-utilities", "development-tools"]
+readme = "README.md"
+
+[[bin]]
+name = "bundles"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+syn = { version = "2", features = ["full", "parsing"] }
+walkdir = "2.5"
+sha2 = "0.10"
+regex = "1.11"
+pathgen = "0.1.0"
+installation = { version = "0.2.0", path = "../installation" }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
