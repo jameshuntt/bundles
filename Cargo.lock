@@ -250,6 +250,8 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 [[package]]
 name = "installation"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "644226d253603522d0e386451a565531fe2bdcb5d21a4873c969976cf53f3d7e"
 dependencies = [
  "dirs",
  "pathgen",

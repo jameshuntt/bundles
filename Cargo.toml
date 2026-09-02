@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.78"
 license = "MIT OR Apache-2.0"
 description = "Bundle a source tree into one annotated file and unbundle it back, safely: marker lines per file, ignore dirs, text-only, no path escapes."
-authors = ["James Hunt <jameshuntdevelopment@gmail.com>"]
+authors = ["James Hunt <james@1o.business>"]
 repository = "https://github.com/jameshuntt/bundles"
 keywords = ["bundle", "source", "archive", "unbundle"]
 categories = ["command-line-utilities", "development-tools"]
@@ -22,7 +22,7 @@ walkdir = "2.5"
 sha2 = "0.10"
 regex = "1.11"
 pathgen = "0.1.0"
-installation = { version = "0.2.0", path = "../installation" }
+installation = "0.2.0"
 thiserror = "2"
 
 [dev-dependencies]
