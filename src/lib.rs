@@ -15,13 +15,22 @@
 //!   `../` and absolute paths inside a bundle are errors, not writes.
 //! - The Rust module walker follows both layouts (`x.rs` + `x/`, `x/mod.rs`)
 //!   and `#[path]`, and returns errors instead of panicking.
+//!
+//! An explicit file set ([`bundle_set`], [`BundleWriter`]) writes the same
+//! format from entries the caller names, in the caller's order, from bytes or
+//! a reader, each with an optional note and an optional redaction: a file or
+//! a window of its lines replaced by one marker line carrying the level that
+//! redacted it and the digest of what was left out ([`redaction`]).
 
 pub mod bundler;
+#[cfg(feature = "bin")]
 pub mod cli;
 pub mod module_tree;
+pub mod redaction;
 pub mod unbundler;
 
-pub use bundler::{bundle_files, bundle_only_used, BundleOptions, BundleReport};
+pub use bundler::{bundle_files, bundle_only_used, bundle_set, BundleOptions, BundleReport, BundleWriter, FileEntry, Redacted, SetReport, Source};
+#[cfg(feature = "bin")]
 pub use cli::{Cli, Commands};
 pub use module_tree::{flatten_tree, resolve_module_tree, ModuleNode, NodeKind};
 pub use unbundler::{unbundle_files, UnbundleReport};
@@ -45,6 +54,8 @@ pub enum BundleError {
     Parse { path: std::path::PathBuf, message: String },
     #[error("comment prefix must not be empty")]
     EmptyPrefix,
+    #[error("entry `{path}`: {reason}")]
+    Entry { path: String, reason: String },
 }
 
 pub(crate) fn io_at(path: &std::path::Path) -> impl FnOnce(std::io::Error) -> BundleError + '_ {
