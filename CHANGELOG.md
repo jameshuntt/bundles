@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.3 (pending, not published)
+## 0.2.3 (2026-10-19)
 
 A caller that already knows which files belong in a bundle had no way to say
 so. `bundle_files` walks a root
