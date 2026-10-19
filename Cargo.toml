@@ -2,7 +2,7 @@
 name = "bundles"
 version = "0.2.3"
 edition = "2021"
-rust-version = "1.78"
+rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 description = "Bundle a source tree into one annotated file and unbundle it back, safely: marker lines per file, ignore dirs, text-only, no path escapes."
 authors = ["James Hunt <james@1o.business>"]

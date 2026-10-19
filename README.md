@@ -61,3 +61,9 @@ neither clap nor `installation` sets `default-features = false`.
 crate: cargo is asked where the built binary really is, a plan is printed,
 the copy is verified, a receipt is kept, and `~/.local/bin` is added to
 `PATH` once.
+
+## Releasing
+
+Bump `version` in Cargo.toml and give CHANGELOG.md a dated `## <version> (YYYY-MM-DD)` entry, then push to main.
+CI (`.github/workflows/ci.yml`) tests on stable and Rust 1.85, runs clippy, and publishes to crates.io
+through trusted publishing; a version already on crates.io, or an entry still marked `(unreleased)`, publishes nothing.
